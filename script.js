@@ -16,6 +16,88 @@ const senderFilter = document.getElementById("senderFilter");
 const chatTitle = document.getElementById("chatTitle");
 
 let parsedMessages = [];
+let mediaFiles = new Map();
+let createdObjectUrls = [];
+
+function clearMediaUrls() {
+    createdObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    createdObjectUrls = [];
+    mediaFiles.clear();
+}
+
+function getBaseName(path) {
+    return path.split("/").pop().toLowerCase();
+}
+
+function findMediaForMessage(message) {
+    const lowerMessage = (message || "").toLowerCase();
+    for (const [baseName, media] of mediaFiles.entries()) {
+        if (baseName && lowerMessage.includes(baseName)) return media;
+    }
+    return null;
+}
+
+function removeMediaFilename(message, media) {
+    if (!media) return message;
+    const escaped = media.baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return message.replace(new RegExp(escaped, "ig"), "")
+        .replace(/\s*\(file attached\)/ig, "").trim();
+}
+
+function isOmittedMediaMessage(message) {
+    return /(?:media|image|video|audio|sticker|gif|document)\s+omitted|<media omitted>/i.test(message || "");
+}
+
+function classifyMediaFile(fileName) {
+    const name = fileName.toLowerCase();
+    const ext = name.split(".").pop();
+    if (["jpg", "jpeg", "png", "webp", "gif", "bmp", "avif"].includes(ext)) {
+        return { kind: "image", isGif: ext === "gif" };
+    }
+    if (["mp4", "mov", "webm", "m4v"].includes(ext)) {
+        return { kind: "video", isGif: /gif/i.test(name) };
+    }
+    if (["mp3", "m4a", "aac", "ogg", "opus", "wav"].includes(ext)) return { kind: "audio" };
+    if (["pdf", "doc", "docx", "zip"].includes(ext)) return { kind: "file" };
+    return null;
+}
+
+function renderMediaElement(media) {
+    let element;
+    if (media.kind === "image") {
+        element = document.createElement("img");
+        element.src = media.url;
+        element.alt = "Shared image or sticker";
+        element.loading = "lazy";
+        element.className = "chat-media-image";
+    } else if (media.kind === "video") {
+        element = document.createElement("video");
+        element.src = media.url;
+        element.controls = true;
+        element.preload = "metadata";
+        element.className = "chat-media-video";
+        if (media.isGif) {
+            element.loop = true;
+            element.muted = true;
+            element.autoplay = true;
+            element.playsInline = true;
+            element.controls = false;
+        }
+    } else if (media.kind === "audio") {
+        element = document.createElement("audio");
+        element.src = media.url;
+        element.controls = true;
+        element.preload = "metadata";
+        element.className = "chat-media-audio";
+    } else {
+        element = document.createElement("a");
+        element.href = media.url;
+        element.download = media.baseName;
+        element.textContent = "Download " + media.baseName;
+        element.className = "chat-media-file";
+    }
+    return element;
+}
 
 
 // STEP 1: Read the selected TXT or ZIP file
@@ -25,6 +107,7 @@ fileInput.addEventListener("change", async function () {
 
     if (!file) return;
 
+    clearMediaUrls();
     preview.textContent = "";
     parsedPreview.textContent = "";
     messageCount.textContent = "0 messages";
@@ -57,14 +140,29 @@ fileInput.addEventListener("change", async function () {
                 throw new Error("ZIP ke andar TXT file nahi mili.");
             }
 
-            // Prefer the WhatsApp chat TXT file
+            // Prefer the WhatsApp transcript, often named _chat.txt
             const chatFile = textFiles.find(entry =>
-                /whatsapp chat.*\.txt$/i.test(
-                    entry.name.split("/").pop()
-                )
+                /(?:_chat|whatsapp chat).*\.txt$/i.test(entry.name.split("/").pop())
             ) || textFiles[0];
 
             chatText = await chatFile.async("string");
+
+            // Read supported media files from the ZIP. Files stay in this browser.
+            const mediaEntries = Object.values(zip.files).filter(entry =>
+                !entry.dir && entry !== chatFile && !!classifyMediaFile(entry.name)
+            );
+
+            for (const entry of mediaEntries) {
+                const blob = await entry.async("blob");
+                const url = URL.createObjectURL(blob);
+                createdObjectUrls.push(url);
+                const baseName = getBaseName(entry.name);
+                mediaFiles.set(baseName, {
+                    baseName,
+                    url,
+                    ...classifyMediaFile(entry.name)
+                });
+            }
 
         } else {
             throw new Error("Please select a TXT or ZIP file.");
@@ -329,12 +427,25 @@ function renderChat(messages) {
             bubble.appendChild(name);
         }
 
-        // Message content
-        const text = document.createElement("div");
-        text.className = "message-text";
-        text.textContent = msg.message;
+        // Display message text and any media whose filename appears in the transcript
+        const media = findMediaForMessage(msg.message);
+        const cleanText = media ? removeMediaFilename(msg.message, media) : msg.message;
 
-        bubble.appendChild(text);
+        if (cleanText) {
+            const text = document.createElement("div");
+            text.className = "message-text";
+            text.textContent = cleanText;
+            bubble.appendChild(text);
+        }
+
+        if (media) {
+            bubble.appendChild(renderMediaElement(media));
+        } else if (isOmittedMediaMessage(msg.message)) {
+            const missing = document.createElement("div");
+            missing.className = "missing-media";
+            missing.textContent = "Media wasn't included or couldn't be matched in this ZIP.";
+            bubble.appendChild(missing);
+        }
 
         // Message time
         const time = document.createElement("div");
