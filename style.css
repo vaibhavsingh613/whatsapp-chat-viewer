@@ -500,3 +500,46 @@ footer {
         grid-template-columns: 1fr;
     }
 }
+
+
+/* Media and emoji improvements for the chat viewer */
+.message-text {
+    font-family: Arial, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-variant-emoji: emoji;
+    overflow-wrap: anywhere;
+}
+
+.chat-media-image,
+.chat-media-video {
+    display: block;
+    width: auto;
+    max-width: min(100%, 320px);
+    max-height: 360px;
+    object-fit: contain;
+    border-radius: 8px;
+    margin-top: 6px;
+}
+
+.chat-media-audio {
+    display: block;
+    width: min(280px, 100%);
+    max-width: 100%;
+    margin-top: 6px;
+}
+
+.chat-media-file {
+    display: inline-block;
+    margin-top: 6px;
+    color: #075e54;
+    overflow-wrap: anywhere;
+}
+
+.missing-media {
+    margin-top: 5px;
+    padding: 7px 9px;
+    border-radius: 7px;
+    background: rgba(0, 0, 0, 0.045);
+    color: #667781;
+    font-size: 12px;
+    font-style: italic;
+}
